@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package fileformat.pb;
+option go_package = "pb";
+
+message Person {
+    int32 age = 1;
+    string name = 2;
+}
