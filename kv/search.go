@@ -1,10 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"hello/fileformat/lib"
-)
-
+import reduce_segment "hello/kv/kvlib/reduce-segment"
 
 func main() {
 	//writeSimpleFile("test")
@@ -14,38 +10,40 @@ func main() {
 	//binarySearchToKeyValFile("bigfile", 1)
 
 
-	//kvBuilder := lib.NewKeyValBuilder("bigfile_v3")
+	//kvBuilder := simple.NewKeyValBuilder("bigfile_v3")
 	//for i := 0; i < 1000000; i++ {
-	//	c := lib.ComplexPerson{Age:uint32(i), Name:fmt.Sprintf("name is %d", i)}
+	//	c := kvpb.ComplexPerson{Age:uint32(i), Name:fmt.Sprintf("name is %d", i)}
 	//	kvBuilder.Append(c.Age, c.Marshal())
 	//}
-	//kvShard := kvBuilder.Close()
+	//kvBuilder.Close()
 
-	kvShard := lib.NewKeyValueShard("bigfile_v3")
-	var complexPerson lib.ComplexPerson
-	var bts []byte
+	//kvShard := simple.NewKeyValueShard("bigfile_v3")
+	//var complexPerson kvpb.ComplexPerson
+	//var bts []byte
+	//
+	//bts = kvShard.Search(500000)
+	//complexPerson.Unmarshal(bts)
+	//fmt.Println(complexPerson)
+	//
+	//bts = kvShard.Search(14)
+	//complexPerson.Unmarshal(bts)
+	//fmt.Println(complexPerson)
+	//
+	//bts = kvShard.Search(2002)
+	//complexPerson.Unmarshal(bts)
+	//fmt.Println(complexPerson)
+	//
+	//bts = kvShard.Search(8064)
+	//complexPerson.Unmarshal(bts)
+	//fmt.Println(complexPerson)
 
-	bts = kvShard.Search(1049)
-	complexPerson.Unmarshal(bts)
-	fmt.Println(complexPerson)
-
-	bts = kvShard.Search(14)
-	complexPerson.Unmarshal(bts)
-	fmt.Println(complexPerson)
-
-	bts = kvShard.Search(2002)
-	complexPerson.Unmarshal(bts)
-	fmt.Println(complexPerson)
-
-	bts = kvShard.Search(8064)
-	complexPerson.Unmarshal(bts)
-	fmt.Println(complexPerson)
+	reduce_segment.NewSegmentBasedKvBuilder("couocu")
 }
 
 //func readTmp(name string, n int) {
 //	tmpBuff, _ := os.Open(name)
 //	bigBuffer := make([]byte, 16)
-//	var k lib.Key
+//	var k kvlib.Key
 //	fmt.Println("\n\n--------")
 //	for i := 0; i < n; i++ {
 //		tmpBuff.ReadAt(bigBuffer, int64(i * 16))
@@ -60,7 +58,7 @@ func main() {
 //
 //	headerBuffer := make([]byte, 8)
 //	file.Read(headerBuffer)
-//	var header lib.FileHeader
+//	var header kvlib.FileHeader
 //	header.Unmarshal(headerBuffer)
 //
 //	left := int64(0)
@@ -75,14 +73,14 @@ func main() {
 //		file.Seek(s, 0)
 //		file.Read(keyBuffer)
 //
-//		var k lib.Key
+//		var k kvlib.Key
 //		k.Unmarshal(keyBuffer)
 //		if k.comparable == age {
 //			valueBuff := make([]byte, k.recordLength)
 //			file.Seek(int64(k.offset), 0)
 //			file.Read(valueBuff)
 //
-//			var complexPerson lib.ComplexPerson
+//			var complexPerson kvlib.ComplexPerson
 //			complexPerson.Unmarshal(valueBuff)
 //			fmt.Println(complexPerson)
 //			return
@@ -106,7 +104,7 @@ func main() {
 //
 //	// write down some values
 //	file, _ := os.OpenFile(filename, os.O_RDWR, 0666)
-//	header := lib.FileHeader{16, 50000000}
+//	header := kvlib.FileHeader{16, 50000000}
 //	file.Write(header.Marshal())
 //
 //	writingOffset := int64(sizeOfFile)
@@ -116,11 +114,11 @@ func main() {
 //		if i % 10000 == 0 {
 //			fmt.Println(i)
 //		}
-//		complexPerson := lib.ComplexPerson{uint32(i), fmt.Sprintf("this is the value %d ", i)}
+//		complexPerson := kvlib.ComplexPerson{uint32(i), fmt.Sprintf("this is the value %d ", i)}
 //		bts := complexPerson.Marshal()
 //
 //		writingOffset -= int64(len(bts))
-//		kv := lib.SimpleKeyValue{key: lib.Key{uint32(i), uint64(writingOffset), uint32(len(bts))}, value: bts}
+//		kv := kvlib.SimpleKeyValue{key: kvlib.Key{uint32(i), uint64(writingOffset), uint32(len(bts))}, value: bts}
 //
 //		// write key
 //		file.Seek(writingKeyOffset, 0)
@@ -137,29 +135,29 @@ func main() {
 //
 //// V1
 //func writeSimpleFile(filename string) {
-//	header := lib.FileHeader{5, 100}
+//	header := kvlib.FileHeader{5, 100}
 //
 //	bts := make([]byte, 0)
 //	bts = append(bts, header.Marshal()...)
 //
 //	for i := 0; i < 100; i++ {
-//		bts = append(bts, lib.Person{uint32(i), true}.Marshal()...)
+//		bts = append(bts, kvlib.Person{uint32(i), true}.Marshal()...)
 //	}
 //	ioutil.WriteFile(filename, bts, 0777)
 //}
-//func onFileBinarySearch(fileName string, targetAge uint32) lib.Person {
+//func onFileBinarySearch(fileName string, targetAge uint32) kvlib.Person {
 //
 //	file, _ := os.Open(fileName)
 //
 //	// get the file header
 //	buff := make([]byte, 10)
 //	file.Read(buff)
-//	var h lib.FileHeader
+//	var h kvlib.FileHeader
 //	h.Unmarshal(buff)
 //
 //	left := int64(0)
 //	right := int64(h.nRecords)
-//	var p lib.Person
+//	var p kvlib.Person
 //
 //	for left <= right {
 //

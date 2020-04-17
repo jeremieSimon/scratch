@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package kvpb;
+option go_package = "kvpb";
+
+message RSKey {
+    fixed32 comparable = 1;
+    fixed64 valueOffset = 2;
+    fixed32 valueLen = 3;
+}
+
+message ReducedSegmentKvHeader {
+    fixed32 keySize = 1;
+    fixed32 nSegments = 2;
+    fixed32 segmentSize = 3;
+    repeated SegmentHeader segmentHeaders = 4;
+}
+
+message SegmentHeader {
+    fixed32 nKeys = 1;
+    fixed64 segmentOffset = 2;
+}

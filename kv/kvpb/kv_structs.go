@@ -1,4 +1,4 @@
-package lib
+package kvpb
 
 import (
 	"bytes"
@@ -7,40 +7,40 @@ import (
 
 // Simple file structure
 type FileHeader struct {
-	recordSize uint32
-	nRecords uint32
+	RecordSize uint32
+	NRecords   uint32
 }
 
 func (f *FileHeader) Marshal() []byte {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, f.recordSize)
-	binary.Write(buf, binary.BigEndian, f.nRecords)
+	binary.Write(buf, binary.BigEndian, f.RecordSize)
+	binary.Write(buf, binary.BigEndian, f.NRecords)
 	return buf.Bytes()
 }
 
 func (f *FileHeader) Unmarshal(bts []byte) {
-	f.recordSize = binary.BigEndian.Uint32(bts[:4])
-	f.nRecords = binary.BigEndian.Uint32(bts[4:])
+	f.RecordSize = binary.BigEndian.Uint32(bts[:4])
+	f.NRecords = binary.BigEndian.Uint32(bts[4:])
 }
 
 type Person struct {
-	age uint32
-	sex bool
+	Age uint32
+	Sex bool
 }
 
 func (p Person) Marshal() []byte {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, p.age)
-	binary.Write(buf, binary.BigEndian, p.sex)
+	binary.Write(buf, binary.BigEndian, p.Age)
+	binary.Write(buf, binary.BigEndian, p.Sex)
 	return buf.Bytes()
 }
 
 func (p *Person) Unmarshal(bts []byte) {
-	p.age = binary.BigEndian.Uint32(bts[:4])
+	p.Age = binary.BigEndian.Uint32(bts[:4])
 	if bts[4] == 1 {
-		p.sex = true
+		p.Sex = true
 	} else {
-		p.sex = false
+		p.Sex = false
 	}
 }
 
@@ -70,21 +70,21 @@ type SimpleKeyValue struct {
 }
 
 type Key struct {
-	comparable uint32
-	offset uint64
-	recordLength uint32
+	Comparable   uint32
+	Offset       uint64
+	RecordLength uint32
 }
 
 func (k Key) Marshal() []byte {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, k.comparable)
-	binary.Write(buf, binary.BigEndian, k.offset)
-	binary.Write(buf, binary.BigEndian, k.recordLength)
+	binary.Write(buf, binary.BigEndian, k.Comparable)
+	binary.Write(buf, binary.BigEndian, k.Offset)
+	binary.Write(buf, binary.BigEndian, k.RecordLength)
 	return buf.Bytes()
 }
 
 func (k *Key) Unmarshal(bts []byte) {
-	k.comparable = binary.BigEndian.Uint32(bts[:4])
-	k.offset = binary.BigEndian.Uint64(bts[4:12])
-	k.recordLength = binary.BigEndian.Uint32(bts[12:16])
+	k.Comparable = binary.BigEndian.Uint32(bts[:4])
+	k.Offset = binary.BigEndian.Uint64(bts[4:12])
+	k.RecordLength = binary.BigEndian.Uint32(bts[12:16])
 }

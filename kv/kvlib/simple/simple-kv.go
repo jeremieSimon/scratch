@@ -1,34 +1,34 @@
-package lib
+package simple
 
 import (
 	"errors"
 	"fmt"
+	"hello/kv/kvpb"
 	"io/ioutil"
 	"os"
 	"sort"
 )
 
 // TODO,
-// 1. be agnostic towards the value type
-// 2. be able to handle different types of key size
-// 3. handle concurrent close + concurrent search
-// 4. virtual table
+// 1. be able to handle different types of key size
+// 2. handle concurrent close + concurrent search
 
 // V3
 type KeyValBuilder struct {
 	f           *os.File
 	nKeys       int
-	keys        []*Key
+	keys        []*kvpb.Key
 	segmentSize int
 	keyOffset   int64
 	valueOffset int64
-	header      *FileHeader
+	header      *kvpb.FileHeader
 	headerLen   int64
 }
 
 type KeyValueShard struct {
-	header      *FileHeader
+	header      *kvpb.FileHeader
 	f           *os.File
+	mem         *BSTNode
 }
 
 func NewKeyValueShard(filename string) KeyValueShard{
@@ -36,33 +36,115 @@ func NewKeyValueShard(filename string) KeyValueShard{
 	headerOffset := make([]byte, 8)
 	f.Read(headerOffset)
 
-	var header FileHeader
+	var header kvpb.FileHeader
 	header.Unmarshal(headerOffset)
 
-	return KeyValueShard{&header, f}
+	mem := NewInMemIndex(f, &header)
+	return KeyValueShard{&header, f, mem}
+}
+
+type BSTNode struct {
+	key kvpb.Key
+	keyOffset int64
+	left *BSTNode
+	right *BSTNode
+}
+
+func NewNode(k kvpb.Key, keyOffset int64) *BSTNode {
+	return &BSTNode{key: k, keyOffset:keyOffset}
+}
+
+func NewInMemIndex(f *os.File, header *kvpb.FileHeader) *BSTNode {
+	left := int64(0)
+	right := int64(header.NRecords)
+
+	keyBuffer := make([]byte, 16)
+	mid := (left + right) / 2
+	s := 8 + (mid * int64(header.RecordSize))
+	f.ReadAt(keyBuffer, s)
+	var k kvpb.Key
+	k.Unmarshal(keyBuffer)
+
+	root := NewNode(k, s)
+	type NodeAndRange struct {
+		node *BSTNode
+		left int64
+		right int64
+	}
+	counter := 1000
+	q := []*NodeAndRange{{root, left, right, }}
+
+	for counter > 0 {
+		nodeAndRange := q[0]
+		node := nodeAndRange.node
+		q = q[1:]
+		mid := (nodeAndRange.left + nodeAndRange.right) / 2
+
+		// build left node
+		midLeft := (nodeAndRange.left + mid) / 2
+		s = 8 + (midLeft * int64(header.RecordSize))
+		f.ReadAt(keyBuffer, s)
+		k.Unmarshal(keyBuffer)
+		leftNode := NewNode(k, s)
+		node.left = leftNode
+
+		// build right node
+		midRight := (mid + nodeAndRange.right) / 2
+		s = 8 + (midRight * int64(header.RecordSize))
+		f.ReadAt(keyBuffer, s)
+		k.Unmarshal(keyBuffer)
+		rightNode := NewNode(k, s)
+		node.right = rightNode
+
+		q = append(q, &NodeAndRange{leftNode, nodeAndRange.left, mid})
+		q = append(q, &NodeAndRange{rightNode, mid, nodeAndRange.right})
+
+		counter -= 2
+	}
+	return root
 }
 
 func (kvShard *KeyValueShard) Search(key uint32) []byte {
-
 	left := int64(0)
-	right := int64(kvShard.header.nRecords)
+	right := (int64(kvShard.header.NRecords) * 16) + 8
+	node := kvShard.mem
+	for node != nil {
+		if key == node.key.Comparable {
+			valueBuff := make([]byte, node.key.RecordLength)
+			kvShard.f.ReadAt(valueBuff, int64(node.key.Offset))
+			return valueBuff
+		} else if key < node.key.Comparable {
+			right = node.keyOffset
+			node = node.left
+		} else {
+			left = node.keyOffset
+			node = node.right
+		}
+	}
+	return kvShard.OnDiskSearch(key, left, right)
+}
+
+func (kvShard *KeyValueShard) OnDiskSearch(key uint32, leftOffset, rightOffset int64) []byte {
+
+	left := (leftOffset - 8) / 16
+	right := (rightOffset - 8) / 16
 
 	keyBuffer := make([]byte, 16)
 	originalOffset := 8
 
 	for left <= right {
 		mid := (left + right) / 2
-		s := int64(originalOffset) + (mid * int64(kvShard.header.recordSize))
+		s := int64(originalOffset) + (mid * int64(kvShard.header.RecordSize))
 		kvShard.f.ReadAt(keyBuffer, s)
 
-		var k Key
+		var k kvpb.Key
 		k.Unmarshal(keyBuffer)
-		if k.comparable == key {
-			valueBuff := make([]byte, k.recordLength)
-			kvShard.f.ReadAt(valueBuff, int64(k.offset))
+		if k.Comparable == key {
+			valueBuff := make([]byte, k.RecordLength)
+			kvShard.f.ReadAt(valueBuff, int64(k.Offset))
 			return valueBuff
 
-		} else if k.comparable < key {
+		} else if k.Comparable < key {
 			left = mid + 1
 		} else {
 			right = mid - 1
@@ -77,21 +159,21 @@ func NewKeyValBuilder(filename string) *KeyValBuilder {
 	ioutil.WriteFile(filename, bigBuff, 0666)
 	f, _ := os.OpenFile(filename, os.O_RDWR, 0666)
 
-	header := FileHeader{16, 50000000}
+	header := kvpb.FileHeader{16, 50000000}
 	f.Write(header.Marshal())
 
-	return &KeyValBuilder{f, 0, make([]*Key, 0), 1000, 8, 750000000, &header, 8}
+	return &KeyValBuilder{f, 0, make([]*kvpb.Key, 0), 1000, 8, 750000000, &header, 8}
 }
 
 func (k *KeyValBuilder) Append(key uint32, value []byte) error {
 	k.valueOffset -= int64(len(value))
 	k.f.WriteAt(value, k.valueOffset)
 
-	kkey := &Key{key, uint64(k.valueOffset),uint32(len(value))}
+	kkey := &kvpb.Key{key, uint64(k.valueOffset),uint32(len(value))}
 	k.keys = append(k.keys, kkey)
 	k.nKeys += 1
 
-	if k.nKeys == int(k.header.nRecords) {
+	if k.nKeys == int(k.header.NRecords) {
 		return errors.New("max size reached")
 	}
 	if len(k.keys) == k.segmentSize {
@@ -101,19 +183,26 @@ func (k *KeyValBuilder) Append(key uint32, value []byte) error {
 }
 
 func (k *KeyValBuilder) Close() KeyValueShard {
+	// flush keys
 	k.writeKeys()
+
+	// merge segments
 	k.mergeSegments()
-	k.header.nRecords = uint32(k.nKeys)
+
+	k.header.NRecords = uint32(k.nKeys)
 	k.f.WriteAt(k.header.Marshal(), 0)
+
+	inMem := NewInMemIndex(k.f, k.header)
+
 	return KeyValueShard {
-		k.header, k.f,
+		k.header, k.f, inMem,
 	}
 }
 
 func (k *KeyValBuilder) writeKeys() {
 	// sort the keys in  memory
 	sort.Slice(k.keys, func(i, j int) bool {
-		return k.keys[i].comparable <= k.keys[j].comparable
+		return k.keys[i].Comparable <= k.keys[j].Comparable
 	})
 
 	// write keys
@@ -122,7 +211,7 @@ func (k *KeyValBuilder) writeKeys() {
 		k.f.WriteAt(bts, k.keyOffset)
 		k.keyOffset += int64(len(bts))
 	}
-	k.keys = make([]*Key, 0)
+	k.keys = make([]*kvpb.Key, 0)
 }
 
 func (k *KeyValBuilder) mergeSegments() {
@@ -131,10 +220,10 @@ func (k *KeyValBuilder) mergeSegments() {
 		right int64
 	}
 	segmentsToMerge := make([]*SegmentRange, 0)
-	maxRight := (int64(k.nKeys) * int64(k.header.recordSize)) + 8
+	maxRight := (int64(k.nKeys) * int64(k.header.RecordSize)) + 8
 	for i := 0; i < k.nKeys; i += k.segmentSize {
-		left := (int64(i) * int64(k.header.recordSize)) + 8
-		right := (int64(i + k.segmentSize) * int64(k.header.recordSize)) + 8
+		left := (int64(i) * int64(k.header.RecordSize)) + 8
+		right := (int64(i + k.segmentSize) * int64(k.header.RecordSize)) + 8
 		if right > maxRight {
 			right = maxRight
 		}
@@ -175,10 +264,10 @@ func (k *KeyValBuilder) merge(leftSegmentStart, leftSegmentEnd, rightSegmentStar
 	leftOffset := leftSegmentStart
 	rightOffset := rightSegmentStart
 
-	var leftK Key
-	var rightK Key
-	leftKeyBuffer := make([]byte, k.header.recordSize)
-	rightKeyBuffer := make([]byte, k.header.recordSize)
+	var leftK kvpb.Key
+	var rightK kvpb.Key
+	leftKeyBuffer := make([]byte, k.header.RecordSize)
+	rightKeyBuffer := make([]byte, k.header.RecordSize)
 
 	for leftOffset < leftSegmentEnd && rightOffset < rightSegmentEnd {
 		k.f.ReadAt(leftKeyBuffer, leftOffset)
@@ -187,7 +276,7 @@ func (k *KeyValBuilder) merge(leftSegmentStart, leftSegmentEnd, rightSegmentStar
 		k.f.ReadAt(rightKeyBuffer, rightOffset)
 		rightK.Unmarshal(rightKeyBuffer)
 
-		if leftK.comparable < rightK.comparable {
+		if leftK.Comparable < rightK.Comparable {
 			tmpBuff.Write(leftKeyBuffer)
 			leftOffset += 16
 		} else {
@@ -225,13 +314,13 @@ func (k *KeyValBuilder) merge(leftSegmentStart, leftSegmentEnd, rightSegmentStar
 }
 
 func (k *KeyValBuilder) readKeys() {
-	keys := make([]*Key, k.nKeys)
+	keys := make([]*kvpb.Key, k.nKeys)
 	keyBuffer := make([]byte, 16)
 
 	for i := 0; i < k.nKeys; i ++ {
 		k.f.Seek(int64((i * 16) + 8), 0)
 		k.f.Read(keyBuffer)
-		var key Key
+		var key kvpb.Key
 		key.Unmarshal(keyBuffer)
 		keys[i] = &key
 		fmt.Println(key)
