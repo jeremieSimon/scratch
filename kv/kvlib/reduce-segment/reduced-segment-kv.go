@@ -2,7 +2,6 @@ package reduce_segment
 
 import (
 	"encoding/binary"
-	"fmt"
 	"hello/kv/kvpb"
 	"io/ioutil"
 	"os"
@@ -12,14 +11,15 @@ import (
 )
 
 type SegmentBasedKvBuilder struct {
-	f *os.File
-	header *kvpb.ReducedSegmentKvHeader
+	f             *os.File
+	header        *kvpb.ReducedSegmentKvHeader
 	nKeyInSegment int
-	valueOffset int64
+	valueOffset   int64
+	keyOffset     int64
 }
 
 type SegmentBasedKv struct {
-	f *os.File
+	f      *os.File
 	header *kvpb.ReducedSegmentKvHeader
 }
 
@@ -44,10 +44,11 @@ func NewSegmentBasedKvBuilder(filename string) *SegmentBasedKvBuilder {
 
 	f, _ := os.OpenFile(filename, os.O_RDWR, 0666)
 
+	// cheap hack to get a predictable size
 	rsKey := kvpb.RSKey{
-		Comparable:99,
-		ValueLen:99,
-		ValueOffset:99,
+		Comparable:  99,
+		ValueLen:    99,
+		ValueOffset: 99,
 	}
 	keySize := rsKey.Size()
 	nSegments := 1000
@@ -55,12 +56,12 @@ func NewSegmentBasedKvBuilder(filename string) *SegmentBasedKvBuilder {
 	segmentHeaders := make([]*kvpb.SegmentHeader, nSegments)
 	for i := 0; i < nSegments; i++ {
 		segmentOffset := keySize * 1000 * i
-		segmentHeaders[i] = &kvpb.SegmentHeader{NKeys:1, SegmentOffset:uint64(segmentOffset)}
+		segmentHeaders[i] = &kvpb.SegmentHeader{NKeys: 1, SegmentOffset: uint64(segmentOffset)}
 	}
 	header := kvpb.ReducedSegmentKvHeader{
-		KeySize: uint32(keySize),
-		NSegments:uint32(nSegments),
-		SegmentSize: uint32(nSegments) * uint32(keySize),
+		KeySize:        uint32(keySize),
+		NSegments:      uint32(nSegments),
+		SegmentSize:    uint32(nSegments) * uint32(keySize),
 		SegmentHeaders: segmentHeaders,
 	}
 
@@ -68,38 +69,40 @@ func NewSegmentBasedKvBuilder(filename string) *SegmentBasedKvBuilder {
 	f.Write(headerBts)
 
 	return &SegmentBasedKvBuilder{
-		f: f,
-		header: &header,
+		f:             f,
+		header:        &header,
 		nKeyInSegment: 1000,
-		valueOffset: 750000000,
+		valueOffset:   750000000,
+		keyOffset:     int64(header.Size()),
 	}
 }
 
-func (b SegmentBasedKvBuilder) Append(comparable uint32, value []byte) {
+func (b *SegmentBasedKvBuilder) Append(comparable uint32, value []byte) {
 	// find segment number
 	bs := make([]byte, 4)
 	binary.BigEndian.PutUint32(bs, comparable)
 	hash := farm.Hash32WithSeed(bs, 9)
 	segmentNumber := hash % b.header.NSegments
 
+	// increment segment
+	segmentHeader := b.header.SegmentHeaders[segmentNumber]
+	segmentHeader.NKeys += 1
+
 	// write value
-	b.valueOffset -=  int64(len(value))
+	b.valueOffset -= int64(len(value))
 	b.f.WriteAt(value, b.valueOffset)
 
 	// build key
 	rsKey := kvpb.RSKey{
-		Comparable:           comparable,
-		ValueOffset:          uint64(b.valueOffset),
-		ValueLen:             uint32(len(value)),
+		Comparable:  comparable,
+		ValueOffset: uint64(b.valueOffset),
+		ValueLen:    uint32(len(value)),
 	}
 
 	// write key
-	segmentHeader := b.header.SegmentHeaders[segmentNumber]
-	segmentOffset := segmentHeader.SegmentOffset + uint64(b.header.Size()) + uint64((segmentHeader.NKeys - 1) * b.header.KeySize)
 	bs, _ = rsKey.Marshal()
-	b.f.WriteAt(bs, int64(segmentOffset))
-
-	segmentHeader.NKeys += 1
+	b.f.WriteAt(bs, b.keyOffset)
+	b.keyOffset += int64(len(bs))
 }
 
 func (kv *SegmentBasedKv) Search(key uint32) []byte {
@@ -120,7 +123,7 @@ func (kv *SegmentBasedKv) Search(key uint32) []byte {
 	// run binary search on the segment
 	for left <= right {
 		mid := (left + right) / 2
-		midOffset := uint64(kv.header.Size()) + segment.SegmentOffset + uint64(uint32(mid) * kv.header.KeySize)
+		midOffset := segment.SegmentOffset + uint64(uint32(mid)*kv.header.KeySize)
 		kv.f.ReadAt(keyBuffer, int64(midOffset))
 
 		rsKey.Unmarshal(keyBuffer)
@@ -140,54 +143,90 @@ func (kv *SegmentBasedKv) Search(key uint32) []byte {
 
 }
 
-func (b SegmentBasedKvBuilder) Close() *SegmentBasedKv {
-	// resort each segment
-	for _, segmentHeader := range b.header.SegmentHeaders {
+func (b *SegmentBasedKvBuilder) Close() *SegmentBasedKv {
+	// 1. adjust segment offset
+	baseOffset := int64(b.header.Size())
+	nKeysBefore := int64(0)
 
-		keys := make([]*kvpb.RSKey, segmentHeader.NKeys - 1)
+	segIdToOffset := make(map[uint32]int64)
 
-		startingOffset := int64(segmentHeader.SegmentOffset) + int64(b.header.Size())
-		endingOffset := startingOffset + (int64(segmentHeader.NKeys - 1) * int64(b.header.KeySize))
+	for i, segment := range b.header.SegmentHeaders {
+		segment.SegmentOffset = uint64(baseOffset + (nKeysBefore * int64(b.header.KeySize)))
+		segIdToOffset[uint32(i)] = int64(segment.SegmentOffset)
+		nKeysBefore += int64(segment.NKeys) - 1
+	}
 
-		// resort key segment
-		buffer := make([]byte, endingOffset - startingOffset)
-		b.f.ReadAt(buffer, startingOffset)
+	bigBuff := make([]byte, nKeysBefore * int64(b.header.KeySize))
 
-		for i := 1; i < int(segmentHeader.NKeys); i++ {
-			var leftEnd int
-			if i == 0 {
-				leftEnd = 0
-			} else {
-				leftEnd = (i - 1) * int(b.header.KeySize)
-			}
-			rightEnd := i * int(b.header.KeySize)
-			var k kvpb.RSKey
-			k.Unmarshal(buffer[leftEnd:rightEnd])
-			keys[i - 1] = &k
+	ioutil.WriteFile("tmp", bigBuff, 0666)
+	tmp, _ := os.OpenFile("tmp", os.O_RDWR, 0666)
+	// 2. read all keys,
+	// write them to their proper segment in a temp file.
+	keyBuffer := make([]byte, b.header.KeySize)
+	keyOffset := int64(0)
+	for i := 0; i < int(nKeysBefore); i++ {
+		b.f.ReadAt(keyBuffer, baseOffset + keyOffset)
+		var rsKey kvpb.RSKey
+		rsKey.Unmarshal(keyBuffer)
+
+		// find segment and write to correct segment
+		bs := make([]byte, 4)
+		binary.BigEndian.PutUint32(bs, rsKey.Comparable)
+		hash := farm.Hash32WithSeed(bs, 9)
+		segmentId := hash % b.header.NSegments
+		writeOffset := segIdToOffset[segmentId] - baseOffset
+		tmp.WriteAt(keyBuffer, writeOffset)
+
+		segIdToOffset[segmentId] += int64(b.header.KeySize)
+		keyOffset += int64(b.header.KeySize)
+	}
+
+	// 3. write back segment per segment
+	// read segment per segment in tmp file,
+	// sort keys within each segment and write them back
+	tmpOffset := int64(0)
+	for segId, segment := range b.header.SegmentHeaders {
+		// read all keys
+		startOffset := segment.SegmentOffset
+		endOffset := segIdToOffset[uint32(segId)]
+		keyBuffer := make([]byte, endOffset - int64(startOffset))
+		tmp.ReadAt(keyBuffer, tmpOffset)
+
+		// deser all keys
+		left := uint32(0)
+		right := b.header.KeySize
+		keys := make([]kvpb.RSKey, segment.NKeys - 1)
+		for i := 0; i < int(segment.NKeys - 1); i++ {
+			var rsKey kvpb.RSKey
+			rsKey.Unmarshal(keyBuffer[left:right])
+			keys[i] = rsKey
+			left = right
+			right += b.header.KeySize
 		}
 
+		// sort
 		sort.Slice(keys, func(i, j int) bool {
 			return keys[i].Comparable < keys[j].Comparable
 		})
 
 		// write back the keys
-		for nthKey, key := range keys {
+		left = 0
+		right = b.header.KeySize
+		keyBuffer = make([]byte, 0)
+		for _, key := range keys {
 			bts, _ := key.Marshal()
-			b.f.WriteAt(bts, startingOffset + (int64(nthKey) * int64(b.header.KeySize)))
+			keyBuffer = append(keyBuffer, bts...)
+			left = right
+			right += b.header.KeySize
 		}
+		b.f.WriteAt(keyBuffer, tmpOffset + baseOffset)
+		tmpOffset += int64(len(keyBuffer))
 	}
-
-	headerBuffer, _ := b.header.Marshal()
-	b.f.Write(headerBuffer)
-	b.f.Close()
-
-	fmt.Println(b.header.Size())
+	headerBts, _ := b.header.Marshal()
+	b.f.Write(headerBts)
 
 	return &SegmentBasedKv{
 		f:      b.f,
 		header: b.header,
 	}
 }
-
-
-

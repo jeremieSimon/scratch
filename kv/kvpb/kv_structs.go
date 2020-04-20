@@ -65,7 +65,7 @@ func (p *ComplexPerson) Unmarshal(bts []byte) {
 }
 
 type SimpleKeyValue struct {
-	key Key
+	key   Key
 	value []byte
 }
 
