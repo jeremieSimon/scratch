@@ -53,11 +53,11 @@ func (k *SimpleComparableKey) Marshal() []byte {
 	return buf.Bytes()
 }
 
-func SmallerThan(left, right []byte) bool {
-	return Compare(left, right) < 0
+func (k SimpleComparableKey) SmallerThan(left, right []byte) bool {
+	return k.Compare(left, right) < 0
 }
 
-func Compare(left, right []byte) int {
+func (k SimpleComparableKey) Compare(left, right []byte) int {
 	if left[0] > right[0] {
 		return 1
 	} else if left[0] < right[0] {
