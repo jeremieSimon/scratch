@@ -37,11 +37,7 @@ func NewSegmentBasedKv(filename string) *SegmentBasedKv {
 }
 
 func NewSegmentBasedKvBuilder(filename string) *SegmentBasedKvBuilder {
-	sizeOfFile := 750000000
-	bigBuff := make([]byte, sizeOfFile)
-	ioutil.WriteFile(filename, bigBuff, 0666)
-
-	f, _ := os.OpenFile(filename, os.O_RDWR, 0666)
+	f, _ := os.Create(filename)
 
 	// cheap hack to get a predictable size
 	key := bytesort.NewSimpleKey(10, 10, 10)
@@ -131,7 +127,6 @@ func (kv *SegmentBasedKv) Search(key uint32) []byte {
 	}
 
 	return []byte{}
-
 }
 
 func (b *SegmentBasedKvBuilder) Close() *SegmentBasedKv {

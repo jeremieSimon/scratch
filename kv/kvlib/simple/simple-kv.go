@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"hello/kv/kvpb"
-	"io/ioutil"
 	"os"
 	"sort"
 )
@@ -154,10 +153,7 @@ func (kvShard *KeyValueShard) OnDiskSearch(key uint32, leftOffset, rightOffset i
 }
 
 func NewKeyValBuilder(filename string) *KeyValBuilder {
-	sizeOfFile := 750000000
-	bigBuff := make([]byte, sizeOfFile)
-	ioutil.WriteFile(filename, bigBuff, 0666)
-	f, _ := os.OpenFile(filename, os.O_RDWR, 0666)
+	f, _ := os.Create(filename)
 
 	header := kvpb.FileHeader{16, 50000000}
 	f.Write(header.Marshal())

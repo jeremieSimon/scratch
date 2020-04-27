@@ -498,7 +498,7 @@ func (m *RSKey) Unmarshal(dAtA []byte) error {
 		switch fieldNum {
 		case 1:
 			if wireType != 5 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Comparable", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SmallerThan", wireType)
 			}
 			m.Comparable = 0
 			if (iNdEx + 4) > l {
